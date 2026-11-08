@@ -1,0 +1,43 @@
+<div class="stmem-settings">
+  <div class="inline-drawer">
+    <div class="inline-drawer-toggle inline-drawer-header">
+      <b>通用剧情记忆</b>
+      <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+    </div>
+    <div class="inline-drawer-content">
+      <label class="checkbox_label"><input type="checkbox" id="stmem_enabled"> 启用插件</label>
+      <label class="checkbox_label"><input type="checkbox" id="stmem_auto"> 自动总结剧情</label>
+      <label class="checkbox_label"><input type="checkbox" id="stmem_kw"> 启用关键词记忆</label>
+      <label class="checkbox_label"><input type="checkbox" id="stmem_extract"> 总结时自动提取关键词条目</label>
+      <label>每隔多少条消息总结一次 <input type="number" id="stmem_interval" class="text_pole" min="2"></label>
+      <label>总结注入深度 <input type="number" id="stmem_depth" class="text_pole" min="0"></label>
+      <label>注入位置
+        <select id="stmem_position" class="text_pole">
+          <option value="1">聊天内（按深度）</option>
+          <option value="0">提示词之后（角色设定后）</option>
+          <option value="2">提示词之前</option>
+        </select>
+      </label>
+      <label>关键词扫描最近消息数 <input type="number" id="stmem_scan" class="text_pole" min="1"></label>
+      <label>关键词条目注入深度 <input type="number" id="stmem_kwdepth" class="text_pole" min="0"></label>
+      <label>总结提示词模板（{{history}} = 最近对话，{{summary}} = 已有总结）</label>
+      <textarea id="stmem_prompt" class="text_pole" rows="6"></textarea>
+      <div class="menu_button" id="stmem_reset_prompt">恢复默认模板</div>
+      <hr>
+      <div class="stmem-row">
+        <div class="menu_button" id="stmem_now">立即总结</div>
+        <span id="stmem_status"></span>
+      </div>
+      <label>当前聊天的剧情总结（可直接编辑）</label>
+      <textarea id="stmem_summary" class="text_pole" rows="8"></textarea>
+      <div class="stmem-row">
+        <div class="menu_button" id="stmem_save_summary">保存总结</div>
+        <div class="menu_button" id="stmem_clear_summary">清空总结</div>
+      </div>
+      <hr>
+      <label>关键词记忆条目（当前聊天）</label>
+      <div id="stmem_entries"></div>
+      <div class="menu_button" id="stmem_add_entry">新增条目</div>
+    </div>
+  </div>
+</div>

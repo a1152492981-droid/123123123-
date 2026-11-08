@@ -1,0 +1,6 @@
+.stmem-settings label{display:block;margin:4px 0}
+.stmem-settings textarea{width:100%}
+.stmem-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.stmem-entry{border:1px solid var(--SmartThemeBorderColor);border-radius:6px;padding:6px;margin:6px 0}
+.stmem-entry input,.stmem-entry textarea{width:100%}
+#stmem_status{opacity:.8;font-size:.9em}
