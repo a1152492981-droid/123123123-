@@ -38,6 +38,17 @@
       <label>关键词记忆条目（当前聊天）</label>
       <div id="stmem_entries"></div>
       <div class="menu_button" id="stmem_add_entry">新增条目</div>
+      <hr>
+      <label>记忆导入 / 导出（换卡续聊）</label>
+      <div class="stmem-row">
+        <div class="menu_button" id="stmem_export">导出记忆</div>
+        <div class="menu_button" id="stmem_copy">复制到剪贴板</div>
+        <div class="menu_button" id="stmem_import">导入记忆</div>
+      </div>
+      <input type="file" id="stmem_import_file" accept=".json,application/json">
+      <label>或粘贴记忆 JSON 后导入</label>
+      <textarea id="stmem_import_text" class="text_pole" rows="3" placeholder="在此粘贴导出的记忆 JSON"></textarea>
+      <div class="menu_button" id="stmem_import_paste">从文本导入</div>
     </div>
   </div>
 </div>

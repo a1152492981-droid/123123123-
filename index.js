@@ -1,6 +1,8 @@
 // 通用剧情记忆 - SillyTavern third-party extension (1.12+)
 const MODULE = 'st_memory';
 const META = 'st_memory';
+const EXPORT_TYPE = 'st_memory';
+const EXT_VERSION = '1.1.0';
 const FOLDER = new URL('.', import.meta.url).href;
 
 const DEFAULT_PROMPT = `[暂停角色扮演。你现在是剧情记录员。]
@@ -41,6 +43,183 @@ function meta() {
 const saveMeta = () => ctx().saveMetadata();
 const saveSet = () => ctx().saveSettingsDebounced();
 const status = (t) => $('#stmem_status').text(t);
+
+function characterName() {
+  const c = ctx();
+  let name = '';
+  try { name = c.name2 || ''; } catch (e) { /* ignore */ }
+  if (!name && c.chat?.length) {
+    const m = c.chat.find(x => !x.is_system && x.name);
+    if (m) name = m.name;
+  }
+  return String(name || '记忆');
+}
+
+function safeFilename(s) {
+  return String(s || '记忆')
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '') || '记忆';
+}
+
+function dateStamp() {
+  const t = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}_${p(t.getHours())}${p(t.getMinutes())}`;
+}
+
+function buildExport() {
+  const d = meta();
+  if (!d) return null;
+  return {
+    type: EXPORT_TYPE,
+    version: EXT_VERSION,
+    exportedAt: new Date().toISOString(),
+    character: characterName(),
+    summary: d.summary || '',
+    entries: JSON.parse(JSON.stringify(d.entries || [])),
+    lastIndex: d.lastIndex || 0,
+  };
+}
+
+function parseMemoryData(raw) {
+  let obj = raw;
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (!s) throw new Error('内容为空');
+    try { obj = JSON.parse(s); } catch (e) { throw new Error('不是有效的 JSON'); }
+  }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('文件格式无效');
+  if (obj.type && obj.type !== EXPORT_TYPE) throw new Error('不是本插件导出的记忆文件');
+  if (obj.summary == null && !Array.isArray(obj.entries)) {
+    throw new Error('文件中没有找到记忆数据（缺少 summary / entries）');
+  }
+  const summary = obj.summary != null ? String(obj.summary) : '';
+  const src = Array.isArray(obj.entries) ? obj.entries : [];
+  const entries = [];
+  for (const e of src) {
+    if (!e || typeof e !== 'object') continue;
+    const kws = (Array.isArray(e.keywords) ? e.keywords : String(e.keywords || '').split(/[,，]/))
+      .map(k => String(k).trim()).filter(Boolean);
+    const content = e.content != null ? String(e.content) : '';
+    if (!kws.length && !content) continue;
+    entries.push({ keywords: kws, content });
+  }
+  return { summary, entries };
+}
+
+function mergeEntries(target, incoming) {
+  for (const e of incoming) {
+    const kws = e.keywords.slice();
+    const ex = kws.length ? target.find(x => x.keywords.some(k => kws.includes(k))) : null;
+    if (ex) {
+      ex.keywords = [...new Set([...ex.keywords, ...kws])];
+      const content = String(e.content || '').trim();
+      if (content && !(ex.content || '').includes(content)) {
+        ex.content = ex.content ? ex.content + '\n' + content : content;
+      }
+    } else {
+      target.push({ keywords: kws, content: String(e.content || '') });
+    }
+  }
+}
+
+function downloadText(filename, text) {
+  const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fallback */ }
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+  document.body.removeChild(ta);
+  return ok;
+}
+
+function exportMemory() {
+  const data = buildExport();
+  if (!data) { toastr.error('当前没有打开的聊天，无法导出'); return; }
+  const text = JSON.stringify(data, null, 2);
+  const filename = `记忆_${safeFilename(data.character)}_${dateStamp()}.json`;
+  downloadText(filename, text);
+  const empty = !data.summary && !data.entries.length;
+  if (empty) toastr.info('当前记忆为空，仍已导出：' + filename);
+  else toastr.success('已导出记忆：' + filename);
+}
+
+async function copyMemory() {
+  const data = buildExport();
+  if (!data) { toastr.error('当前没有打开的聊天，无法复制'); return; }
+  const text = JSON.stringify(data, null, 2);
+  const ok = await copyText(text);
+  if (ok) toastr.success('记忆已复制到剪贴板');
+  else toastr.error('复制失败，请改用「导出记忆」下载文件');
+}
+
+async function applyImported(data) {
+  const d = meta();
+  if (!d) { toastr.error('当前没有打开的聊天，无法导入'); return false; }
+  if (!confirm('将记忆导入到当前聊天？')) return false;
+  const empty = !d.summary && !(d.entries && d.entries.length);
+  let overwrite = true;
+  if (!empty) {
+    overwrite = confirm('如何导入？\n\n确定 = 覆盖当前记忆（清空后写入导入内容）\n取消 = 与当前记忆合并（追加总结，按关键词去重条目）');
+  }
+  if (overwrite) {
+    d.summary = data.summary;
+    d.entries = data.entries.map(e => ({ keywords: e.keywords.slice(), content: e.content }));
+  } else {
+    if (data.summary && data.summary.trim()) {
+      d.summary = (d.summary ? d.summary + '\n' : '') + data.summary.trim();
+    }
+    mergeEntries(d.entries, data.entries);
+  }
+  // 不恢复导出文件里的 lastIndex：新聊天的消息序号不同，应从当前进度继续总结
+  d.lastIndex = (ctx().chat || []).length;
+  await saveMeta();
+  renderChat();
+  inject();
+  toastr.success(overwrite ? '记忆已覆盖导入到当前聊天' : '记忆已合并导入到当前聊天');
+  return true;
+}
+
+async function importFromText(text) {
+  try {
+    const data = parseMemoryData(text);
+    return await applyImported(data);
+  } catch (err) {
+    console.error('[st-memory]', err);
+    toastr.error('导入失败：' + err.message);
+    return false;
+  }
+}
+
+function importFromFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onerror = () => toastr.error('读取文件失败');
+  reader.onload = () => importFromText(String(reader.result || ''));
+  reader.readAsText(file, 'UTF-8');
+}
 
 async function quiet(prompt) {
   const fn = ctx().generateQuietPrompt;
@@ -143,6 +322,19 @@ function bindSettings() {
   $('#stmem_save_summary').on('click', async () => { const d = meta(); if (!d) return; d.summary = $('#stmem_summary').val(); await saveMeta(); inject(); toastr.success('总结已保存'); });
   $('#stmem_clear_summary').on('click', async () => { const d = meta(); if (!d || !confirm('清空当前聊天的总结？')) return; d.summary = ''; d.lastIndex = 0; await saveMeta(); renderChat(); inject(); });
   $('#stmem_add_entry').on('click', async () => { const d = meta(); if (!d) return; d.entries.push({ keywords: [], content: '' }); await saveMeta(); renderChat(); });
+  $('#stmem_export').on('click', () => exportMemory());
+  $('#stmem_copy').on('click', () => copyMemory());
+  $('#stmem_import').on('click', () => { $('#stmem_import_file').val(''); $('#stmem_import_file').trigger('click'); });
+  $('#stmem_import_file').on('change', function () {
+    const file = this.files && this.files[0];
+    this.value = '';
+    if (file) importFromFile(file);
+  });
+  $('#stmem_import_paste').on('click', async () => {
+    const text = $('#stmem_import_text').val();
+    if (!String(text || '').trim()) { toastr.warning('请先粘贴记忆 JSON'); return; }
+    if (await importFromText(text)) $('#stmem_import_text').val('');
+  });
 }
 
 jQuery(async () => {

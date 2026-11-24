@@ -4,3 +4,4 @@
 .stmem-entry{border:1px solid var(--SmartThemeBorderColor);border-radius:6px;padding:6px;margin:6px 0}
 .stmem-entry input,.stmem-entry textarea{width:100%}
 #stmem_status{opacity:.8;font-size:.9em}
+#stmem_import_file{display:none}
