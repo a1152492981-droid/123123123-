@@ -1,7 +1,32 @@
+.stmem-settings{min-width:0;max-width:100%;overflow-x:hidden}
 .stmem-settings label{display:block;margin:4px 0}
-.stmem-settings textarea{width:100%}
-.stmem-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.stmem-entry{border:1px solid var(--SmartThemeBorderColor);border-radius:6px;padding:6px;margin:6px 0}
-.stmem-entry input,.stmem-entry textarea{width:100%}
-#stmem_status{opacity:.8;font-size:.9em}
+.stmem-settings textarea{width:100%;max-width:100%;box-sizing:border-box}
+.stmem-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0}
+.stmem-settings .menu_button,
+.stmem-settings .menu_button_icon{
+  white-space:nowrap;
+  word-break:keep-all;
+  overflow-wrap:normal;
+  writing-mode:horizontal-tb;
+  text-orientation:mixed;
+  flex:0 0 auto;
+  width:auto !important;
+  min-width:max-content;
+  box-sizing:border-box;
+}
+.stmem-status,#stmem_status{
+  display:block;
+  opacity:.85;
+  font-size:.9em;
+  line-height:1.35;
+  margin:4px 0 2px;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+  min-width:0;
+}
+.stmem-entry{border:1px solid var(--SmartThemeBorderColor);border-radius:6px;padding:6px;margin:6px 0;min-width:0}
+.stmem-entry input,.stmem-entry textarea{width:100%;max-width:100%;box-sizing:border-box}
+.stmem-entry-actions{margin-top:4px}
 #stmem_import_file{display:none}
+.stmem-hidden{display:none !important}
