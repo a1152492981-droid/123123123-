@@ -24,6 +24,37 @@
       <textarea id="stmem_prompt" class="text_pole" rows="6"></textarea>
       <div class="menu_button" id="stmem_reset_prompt">恢复默认模板</div>
       <hr>
+      <div class="stmem-ext-box">
+        <b>独立总结 API</b>
+        <label class="checkbox_label"><input type="checkbox" id="stmem_ext_api"> 启用独立API（关闭时仍用酒馆当前连接，角色扮演不受影响）</label>
+        <div id="stmem_ext_api_fields">
+          <label>API 地址（OpenAI 兼容，可带或不带 /chat/completions）
+            <input type="text" id="stmem_ext_url" class="text_pole" list="stmem_ext_url_examples" placeholder="https://openrouter.ai/api/v1" autocomplete="off">
+          </label>
+          <datalist id="stmem_ext_url_examples">
+            <option value="https://openrouter.ai/api/v1"></option>
+            <option value="https://generativelanguage.googleapis.com/v1beta/openai"></option>
+          </datalist>
+          <label>API Key
+            <input type="password" id="stmem_ext_key" class="text_pole" autocomplete="off">
+          </label>
+          <label>模型名
+            <input type="text" id="stmem_ext_model" class="text_pole" list="stmem_ext_models" placeholder="例如 google/gemini-2.5-flash" autocomplete="off">
+          </label>
+          <datalist id="stmem_ext_models"></datalist>
+          <label>最大 Token 数（可选，留空则不发送）
+            <input type="number" id="stmem_ext_max_tokens" class="text_pole" min="1" placeholder="例如 2048">
+          </label>
+          <label>温度（可选，留空则不发送）
+            <input type="number" id="stmem_ext_temp" class="text_pole" min="0" max="2" step="0.1" placeholder="例如 0.3">
+          </label>
+          <div class="stmem-row">
+            <div class="menu_button" id="stmem_ext_test">测试连接</div>
+            <div class="menu_button" id="stmem_ext_models_btn">获取模型列表</div>
+          </div>
+        </div>
+      </div>
+      <hr>
       <div class="stmem-row">
         <div class="menu_button" id="stmem_now">立即总结</div>
         <span id="stmem_status"></span>

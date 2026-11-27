@@ -5,3 +5,6 @@
 .stmem-entry input,.stmem-entry textarea{width:100%}
 #stmem_status{opacity:.8;font-size:.9em}
 #stmem_import_file{display:none}
+.stmem-ext-box{border:1px solid var(--SmartThemeBorderColor);border-radius:6px;padding:8px;margin:8px 0}
+.stmem-ext-box input[type="text"],.stmem-ext-box input[type="password"],.stmem-ext-box input[type="number"]{width:100%;box-sizing:border-box}
+.stmem-hidden{display:none !important}

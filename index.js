@@ -2,7 +2,7 @@
 const MODULE = 'st_memory';
 const META = 'st_memory';
 const EXPORT_TYPE = 'st_memory';
-const EXT_VERSION = '1.1.0';
+const EXT_VERSION = '1.1.3';
 const FOLDER = new URL('.', import.meta.url).href;
 
 const DEFAULT_PROMPT = `[暂停角色扮演。你现在是剧情记录员。]
@@ -20,9 +20,11 @@ const DEFAULT_PROMPT = `[暂停角色扮演。你现在是剧情记录员。]
 {"summary":"本段总结","entries":[{"keywords":["关键词1","关键词2"],"content":"条目内容"}]}`;
 
 const DEFAULTS = {
-  enabled: true, auto: true, keyword: true, extract: true,
+  enabled: false, auto: false, keyword: true, extract: false,
   interval: 10, depth: 4, position: 1, scan: 4, kwDepth: 2,
   prompt: DEFAULT_PROMPT,
+  extApi: false, extUrl: '', extKey: '', extModel: '',
+  extMaxTokens: '', extTemp: '',
 };
 
 let busy = false;
@@ -221,6 +223,208 @@ function importFromFile(file) {
   reader.readAsText(file, 'UTF-8');
 }
 
+const CORS_HINT = '无法连接到总结 API（浏览器跨域 CORS 拦截或网络不通）。已测过：OpenRouter 允许网页直接请求；Google AI Studio 的 OpenAI 兼容接口也会返回 CORS 头。若仍被拦截，可在酒馆根目录 config.yaml 里设置 enableCorsProxy: true 后重启，本插件会优先走酒馆的 /proxy 转发。';
+
+let stProxyState = null; // null=unknown, true=available, false=disabled/missing
+
+function normalizeBaseUrl(input) {
+  let u = String(input || '').trim();
+  if (!u) throw new Error('请填写 API 地址');
+  if (!/^https?:\/\//i.test(u)) throw new Error('API 地址需以 http:// 或 https:// 开头');
+  u = u.replace(/\/+$/, '');
+  u = u.replace(/\/chat\/completions$/i, '');
+  u = u.replace(/\/+$/, '');
+  return u;
+}
+
+function chatCompletionsUrl(base) {
+  return normalizeBaseUrl(base) + '/chat/completions';
+}
+
+function modelsUrl(base) {
+  return normalizeBaseUrl(base) + '/models';
+}
+
+function stAuthHeaders() {
+  try {
+    const h = ctx().getRequestHeaders && ctx().getRequestHeaders();
+    return h && typeof h === 'object' ? h : {};
+  } catch (e) { return {}; }
+}
+
+function isProxyDisabledResponse(res, text) {
+  return res && res.status === 404 && /CORS proxy is disabled/i.test(String(text || ''));
+}
+
+function isNetworkOrCorsError(err) {
+  const n = err && (err.name || '');
+  const m = err && (err.message || '');
+  return n === 'TypeError' || /Failed to fetch|NetworkError|Load failed|Network request failed|CORS/i.test(m);
+}
+
+async function fetchWithTimeout(url, options, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms || 180000);
+  try {
+    return await fetch(url, Object.assign({}, options, { signal: ctrl.signal }));
+  } catch (err) {
+    if (err && err.name === 'AbortError') throw new Error('请求超时');
+    throw err;
+  } finally { clearTimeout(t); }
+}
+
+async function extFetch(url, options) {
+  if (stProxyState === false) return fetchWithTimeout(url, options);
+  try {
+    const headers = Object.assign({}, stAuthHeaders(), (options && options.headers) || {});
+    const res = await fetchWithTimeout('/proxy/' + url, Object.assign({}, options, { headers }));
+    if (stProxyState !== true && res.status === 404) {
+      const text = await res.clone().text().catch(() => '');
+      if (isProxyDisabledResponse(res, text) || /<!DOCTYPE|<html/i.test(text)) {
+        stProxyState = false;
+        return fetchWithTimeout(url, options);
+      }
+    }
+    stProxyState = true;
+    return res;
+  } catch (err) {
+    if (stProxyState == null && !/请求超时/.test(err && err.message || '')) {
+      stProxyState = false;
+      return fetchWithTimeout(url, options);
+    }
+    throw err;
+  }
+}
+
+function optionalNumber(val) {
+  if (val == null || val === '') return null;
+  const n = Number(val);
+  return Number.isFinite(n) ? n : null;
+}
+
+function buildExtMessages(s, history, existingSummary) {
+  const tpl = String(s.prompt || DEFAULT_PROMPT);
+  const system = '你是剧情记录员，不是角色扮演者。不要续写故事或对白，不要输出状态栏。严格按下列说明只输出一个 JSON 对象。\n\n'
+    + tpl.replace(/\{\{history\}\}/g, '（见用户消息中的「最近的对话」）').replace(/\{\{summary\}\}/g, '（见用户消息中的「已有总结」）');
+  const user = '已有的长期记忆总结：\n' + (existingSummary || '（无）') + '\n\n最近的对话：\n' + (history || '（无）') + '\n\n请按系统说明完成总结与提取。';
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ];
+}
+
+function buildExtBody(s, messages, extra) {
+  if (!s.extModel) throw new Error('请填写模型名');
+  const body = { model: s.extModel, messages, stream: false };
+  const maxT = optionalNumber(s.extMaxTokens);
+  if (maxT != null && maxT > 0) body.max_tokens = Math.round(maxT);
+  const temp = optionalNumber(s.extTemp);
+  if (temp != null) body.temperature = temp;
+  if (extra && typeof extra === 'object') Object.assign(body, extra);
+  return body;
+}
+
+function unwrapMessageContent(data) {
+  const c = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) return c.map(p => typeof p === 'string' ? p : ((p && (p.text || p.content)) || '')).join('');
+  if (c && typeof c === 'object' && typeof c.text === 'string') return c.text;
+  throw new Error('独立 API 返回中没有 choices[0].message.content');
+}
+
+async function readHttpError(res) {
+  let msg = 'HTTP ' + res.status + (res.statusText ? ' ' + res.statusText : '');
+  try {
+    const t = await res.text();
+    if (!t) return msg;
+    try {
+      const j = JSON.parse(t);
+      const detail = (j.error && (j.error.message || j.error)) || j.message || j.detail || t;
+      msg += '：' + String(detail).slice(0, 400);
+    } catch (e) {
+      msg += '：' + t.slice(0, 400);
+    }
+  } catch (e) { /* ignore */ }
+  return msg;
+}
+
+async function extChatCompletions(s, messages, extra) {
+  const url = chatCompletionsUrl(s.extUrl);
+  if (!s.extKey) throw new Error('请填写 API Key');
+  const body = buildExtBody(s, messages, extra);
+  let res;
+  try {
+    res = await extFetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + s.extKey,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    if (isNetworkOrCorsError(err)) throw new Error(CORS_HINT);
+    throw err;
+  }
+  if (!res.ok) throw new Error(await readHttpError(res));
+  let data;
+  try { data = await res.json(); } catch (e) { throw new Error('独立 API 返回的不是 JSON'); }
+  return unwrapMessageContent(data);
+}
+
+async function generateSummaryText(filledPrompt, history, existingSummary) {
+  const s = settings();
+  if (!s.extApi) return quiet(filledPrompt);
+  return extChatCompletions(s, buildExtMessages(s, history, existingSummary));
+}
+
+async function testExtConnection() {
+  const s = settings();
+  try {
+    const text = await extChatCompletions(s, [
+      { role: 'system', content: 'You are a connection test. Reply with the single word pong.' },
+      { role: 'user', content: 'ping' },
+    ], { max_tokens: 16 });
+    const clip = String(text || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+    toastr.success('独立 API 连接成功' + (clip ? '：' + clip : ''));
+  } catch (err) {
+    console.error('[st-memory]', err);
+    toastr.error('测试连接失败：' + (err && err.message ? err.message : String(err)));
+  }
+}
+
+async function fetchExtModels() {
+  const s = settings();
+  try {
+    const url = modelsUrl(s.extUrl);
+    let res;
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (s.extKey) headers.Authorization = 'Bearer ' + s.extKey;
+      res = await extFetch(url, { method: 'GET', headers });
+    } catch (err) {
+      if (isNetworkOrCorsError(err)) throw new Error(CORS_HINT);
+      throw err;
+    }
+    if (!res.ok) throw new Error(await readHttpError(res));
+    const data = await res.json();
+    const list = Array.isArray(data && data.data) ? data.data : (Array.isArray(data) ? data : []);
+    const ids = list.map(m => (typeof m === 'string' ? m : (m && m.id))).filter(Boolean);
+    const box = $('#stmem_ext_models').empty();
+    ids.forEach(id => box.append($('<option>').attr('value', id)));
+    if (!ids.length) toastr.info('已请求模型列表，但没有解析到模型名。可手动填写。');
+    else toastr.success('已获取 ' + ids.length + ' 个模型，可在「模型名」框中下拉或输入筛选');
+  } catch (err) {
+    console.error('[st-memory]', err);
+    toastr.error('获取模型列表失败：' + (err && err.message ? err.message : String(err)));
+  }
+}
+
+function toggleExtApiFields() {
+  const on = !!settings().extApi;
+  $('#stmem_ext_api_fields').toggleClass('stmem-hidden', !on);
+}
+
 async function quiet(prompt) {
   const fn = ctx().generateQuietPrompt;
   // 1.13+ uses an object param; 1.12 uses positional args
@@ -238,6 +442,7 @@ function parseJSON(text) {
 async function summarize(force = false) {
   const s = settings(); const d = meta(); const c = ctx();
   if (!d || busy || !c.chat?.length) return;
+  if (!force && (!s.enabled || !s.auto)) return;
   const chat = c.chat;
   const start = Math.min(d.lastIndex, chat.length);
   const msgs = chat.slice(start).filter(m => !m.is_system && m.mes);
@@ -246,7 +451,7 @@ async function summarize(force = false) {
   try {
     const history = msgs.map(m => `${m.name}: ${m.mes}`).join('\n');
     const prompt = s.prompt.replace(/\{\{history\}\}/g, history).replace(/\{\{summary\}\}/g, d.summary || '（无）');
-    const res = parseJSON(await quiet(prompt));
+    const res = parseJSON(await generateSummaryText(prompt, history, d.summary || '（无）'));
     if (res.summary) d.summary = (d.summary ? d.summary + '\n' : '') + String(res.summary).trim();
     if (s.extract && Array.isArray(res.entries)) {
       for (const e of res.entries) {
@@ -318,6 +523,15 @@ function bindSettings() {
   for (const [k, id] of Object.entries(nums)) $('#' + id).val(s[k]).on('input change', function () { s[k] = Number(this.value); saveSet(); inject(); });
   $('#stmem_prompt').val(s.prompt).on('input', function () { s.prompt = this.value; saveSet(); });
   $('#stmem_reset_prompt').on('click', () => { s.prompt = DEFAULT_PROMPT; $('#stmem_prompt').val(s.prompt); saveSet(); });
+  $('#stmem_ext_api').prop('checked', !!s.extApi).on('change', function () { s.extApi = this.checked; saveSet(); toggleExtApiFields(); });
+  $('#stmem_ext_url').val(s.extUrl || '').on('input', function () { s.extUrl = this.value; saveSet(); });
+  $('#stmem_ext_key').val(s.extKey || '').on('input', function () { s.extKey = this.value; saveSet(); });
+  $('#stmem_ext_model').val(s.extModel || '').on('input', function () { s.extModel = this.value; saveSet(); });
+  $('#stmem_ext_max_tokens').val(s.extMaxTokens || '').on('input', function () { s.extMaxTokens = this.value; saveSet(); });
+  $('#stmem_ext_temp').val(s.extTemp || '').on('input', function () { s.extTemp = this.value; saveSet(); });
+  $('#stmem_ext_test').on('click', () => testExtConnection());
+  $('#stmem_ext_models_btn').on('click', () => fetchExtModels());
+  toggleExtApiFields();
   $('#stmem_now').on('click', () => summarize(true));
   $('#stmem_save_summary').on('click', async () => { const d = meta(); if (!d) return; d.summary = $('#stmem_summary').val(); await saveMeta(); inject(); toastr.success('总结已保存'); });
   $('#stmem_clear_summary').on('click', async () => { const d = meta(); if (!d || !confirm('清空当前聊天的总结？')) return; d.summary = ''; d.lastIndex = 0; await saveMeta(); renderChat(); inject(); });
